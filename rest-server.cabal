@@ -47,6 +47,7 @@ executable rest-server-exe
       base >=4.7 && <5
     , rest-server
     , aeson
+    , http-types
     , Spock
     , text
     , monad-logger

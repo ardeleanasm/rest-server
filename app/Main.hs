@@ -16,18 +16,22 @@
 module Main where
 
 
+
+
 import Web.Spock
 import Web.Spock.Config
-
 import Data.Aeson hiding (json)
 import Data.Monoid ((<>))
 import Data.Text (Text,pack)
+import Data.Text.Encoding (decodeUtf8)
 import GHC.Generics
+import Control.Monad.IO.Class (MonadIO)
 import           Control.Monad.Logger    (LoggingT, runStdoutLoggingT)
-import           Database.Persist        hiding (get) -- To avoid a naming clash with Web.Spock.get
+import           Database.Persist        hiding (delete,get) -- To avoid a naming clash with Web.Spock.get
 import qualified Database.Persist        as P         -- We'll be using P.get later for GET /people/<id>.
-import           Database.Persist.Sqlite hiding (get)
+import           Database.Persist.Sqlite hiding (delete,get)
 import           Database.Persist.TH
+import Network.HTTP.Types.Status
 import Lib
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
@@ -58,15 +62,33 @@ app = do
     get ("people" <//> var) $ \personId -> do
         maybePerson <- runSQL $ P.get personId :: ApiAction (Maybe Person)
         case maybePerson of
-            Nothing -> errorJson 2 "Could not find a person with matching id"
+            Nothing -> do 
+                setStatus notFound404
+                errorJson 2 "Could not find a person with matching id"
             Just thePerson -> json thePerson
     post "people" $ do
         maybePerson <- jsonBody :: ApiAction (Maybe Person)
         case maybePerson of
-            Nothing -> errorJson 1 "Failed to parse request body as Person"
+            Nothing -> do 
+                setStatus badRequest400
+                errorJson 1 "Failed to parse request body as Person"
             Just thePerson -> do
                 newId <- runSQL $ insert thePerson
+                setStatus created201
                 json $ object ["result" .= String "success", "id".=newId]
+    put ("people" <//> var) $ \personId -> do
+        maybePerson <- jsonBody
+        case (maybePerson :: Maybe Person) of
+            Nothing -> do
+                setStatus badRequest400
+                errorJson 1 "Failed to parse request body as Person"
+            Just thePerson -> do
+                runSQL $ replace personId thePerson
+                setStatus created201
+                json $ object ["result" .= String "success", "id".=personId]
+    delete ("people" <//> var) $ \personId -> do
+        runSQL $ P.delete (personId :: PersonId)
+        setStatus noContent204
 runSQL
   :: (HasSpock m, SpockConn m ~ SqlBackend)
   => SqlPersistT (LoggingT IO) a -> m a
